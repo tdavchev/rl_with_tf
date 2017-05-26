@@ -533,8 +533,9 @@ def train(sess, env, option_critic):#, critic):
                 _ = option_critic.train_actor(
                         [s], [s2], np.reshape(current_option, [1, 1]), np.reshape(current_action, [1, 1]), np.reshape(score, [1, 1]), np.reshape(done+0, [1, 1]))
 
-                if total_steps % (update_freq) == 0 and RENDER_ENV:
-                    env.render()
+                if total_steps % (update_freq) == 0:
+                    if RENDER_ENV:
+                        env.render()
 
                     # Keep adding experience to the memory until
                     # there are at least minibatch size samples
