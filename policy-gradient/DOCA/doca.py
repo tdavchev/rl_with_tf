@@ -22,7 +22,7 @@ import tensorflow.contrib.slim as slim
 # Update Frequency
 update_freq = 4
 # Max training steps
-MAX_EPISODES = 50000
+MAX_EPISODES = 8000
 # Max episode length
 MAX_EP_STEPS = 250000
 # Base learning rate for the Actor network
@@ -40,9 +40,9 @@ TAU = 0.001
 # Starting chance of random action
 START_EPS = 1
 # Final chance of random action
-END_EPS = 0.1
+END_EPS = 0.05
 # How many steps of training to reduce startE to endE.
-ANNEALING = 1000000.
+ANNEALING = 1000000
 
 # ===========================
 #   Utility Parameters
@@ -50,7 +50,7 @@ ANNEALING = 1000000.
 # Render gym env during training
 RENDER_ENV = True
 # Pretrain steps
-PRE_TRAIN_STEPS = 100000
+PRE_TRAIN_STEPS = 50000
 # Use Gym Monitor
 GYM_MONITOR_EN = True
 # Gym environment
@@ -60,8 +60,8 @@ MONITOR_DIR = './results/gym_ddpg'
 # Directory for storing tensorboard summary results
 SUMMARY_DIR = './results/tf_ddpg'
 # Size of replay buffer
-BUFFER_SIZE = 10000
-MINIBATCH_SIZE = 64
+BUFFER_SIZE = 1000000
+MINIBATCH_SIZE = 32
 
 # Number of options
 OPTION_DIM = 8
@@ -405,8 +405,10 @@ def build_summaries():
     tf.summary.scalar("DOCA/Term Ratio", episode_termination_ratio)
     tot_reward = tf.Variable(0.)
     tf.summary.scalar("DOCA/Total Reward", tot_reward)
+    cum_reward = tf.Variable(0.)
+    tf.summary.scalar("DOCA/Cummulative Reward", tot_reward)
 
-    summary_vars = [episode_reward, episode_ave_max_q, episode_termination_ratio, tot_reward]
+    summary_vars = [episode_reward, episode_ave_max_q, episode_termination_ratio, tot_reward, cum_reward]
     summary_ops = tf.summary.merge_all()
 
     return summary_ops, summary_vars
@@ -474,7 +476,7 @@ def train(sess, env, option_critic):#, critic):
                 termination_counter += 1
                 since_last_term = 1
                 current_option = np.random.randint(OPTION_DIM) \
-                    if (np.random.rand(1) < eps or total_steps < PRE_TRAIN_STEPS) \
+                    if (np.random.rand(1) < eps and total_steps < PRE_TRAIN_STEPS) \
                     else new_option
             else:
                 if print_option_stats:
@@ -483,6 +485,7 @@ def train(sess, env, option_critic):#, critic):
                 since_last_term += 1
 
             action_probs = option_critic.predict_action([s], np.reshape(current_option, [1,1]))[0]
+            # looks dodgy, why is it not categorical and why divide by 6?
             current_action = np.argmax(np.random.multinomial(1, action_probs/6.0))
             if print_option_stats:
                  print current_option
@@ -555,7 +558,8 @@ def train(sess, env, option_critic):#, critic):
                     summary_vars[0]:ep_reward,
                     summary_vars[1]:ep_ave_max_q / float(j),
                     summary_vars[2]:float(termination_counter) / float(j),
-                    summary_vars[3]:total_reward
+                    summary_vars[3]:total_reward,
+                    summary_vars[4]:total_reward/float(i+1)
                 })
 
                 writer.add_summary(summary_str, i)
