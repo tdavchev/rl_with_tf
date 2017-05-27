@@ -1,14 +1,39 @@
-# import os
+import os
 import gym
 from gym import wrappers
+# ========================================
+#   Utility Parameters
 # circumvening TLS static error
 # Init here temporary until os update...
+# ========================================
+# Render gym env during training
+RENDER_ENV = False
+# Pretrain steps
+PRE_TRAIN_STEPS = 50000
+# Use Gym Monitor
+GYM_MONITOR_EN = True
+# Gym environment
 ENV_NAME = 'Pong-v0'
+# Directory for storing gym results
+MONITOR_DIR = './results/gym_ddpg'
+# Directory for storing tensorboard summary results
+SUMMARY_DIR = './results/tf_ddpg'
+# Seed
 RANDOM_SEED = 1234
 env = gym.make(ENV_NAME)
 env.seed(RANDOM_SEED)
+
+if GYM_MONITOR_EN:
+    if not RENDER_ENV:
+        env = wrappers.Monitor(
+            env, MONITOR_DIR, video_callable=None, force=True
+        )
+    else:
+        env = wrappers.Monitor(env, MONITOR_DIR, force=True)
+
+
 env.reset()
-env.render()
+#env.render()
 from collections import deque
 import random
 import numpy as np
@@ -43,28 +68,12 @@ START_EPS = 1
 END_EPS = 0.05
 # How many steps of training to reduce startE to endE.
 ANNEALING = 1000000
-
-# ===========================
-#   Utility Parameters
-# ===========================
-# Render gym env during training
-RENDER_ENV = True
-# Pretrain steps
-PRE_TRAIN_STEPS = 50000
-# Use Gym Monitor
-GYM_MONITOR_EN = True
-# Gym environment
-# ENV_NAME = 'Pendulum-v0'
-# Directory for storing gym results
-MONITOR_DIR = './results/gym_ddpg'
-# Directory for storing tensorboard summary results
-SUMMARY_DIR = './results/tf_ddpg'
-# Size of replay buffer
-BUFFER_SIZE = 1000000
-MINIBATCH_SIZE = 32
-
 # Number of options
 OPTION_DIM = 8
+# Size of replay buffer
+BUFFER_SIZE = 1000000
+# Minibatch size
+MINIBATCH_SIZE = 32
 
 class StateProcessor():
     """
@@ -85,7 +94,6 @@ class StateProcessor():
         Args:
             sess: A Tensorflow session object
             state: A [210, 160, 3] Atari RGB State
-
         Returns:
             A processed [84, 84, 1] state representing grayscale values.
         """
@@ -475,9 +483,7 @@ def train(sess, env, option_critic):#, critic):
 
                 termination_counter += 1
                 since_last_term = 1
-                current_option = np.random.randint(OPTION_DIM) \
-                    if (np.random.rand(1) < eps and total_steps < PRE_TRAIN_STEPS) \
-                    else new_option
+                current_option = np.random.randint(OPTION_DIM) if np.random.rand() < eps else new_option
             else:
                 if print_option_stats:
                     print "keep going"
@@ -575,26 +581,21 @@ def main(_):
     # if not os.path.exists(MONITOR_DIR):
     #     os.makedirs(MONITOR_DIR)
 
-    # if not os.path.exists(SUMMARY_DIR):
-    #     os.makedirs(SUMMARY_DIR)
+    if not os.path.exists(SUMMARY_DIR):
+        os.makedirs(SUMMARY_DIR)
 
     np.random.seed(RANDOM_SEED)
-    
+
     state_dim = env.observation_space.shape[0]
+    action_dim = env.action_space.n
+
     if state_dim == 210:
         # state_dim *= env.observation_space.shape[1] # for grey scale
         state_dim = 84 * 84 * 4
-    action_dim = env.action_space.n
     # action_bound = env.action_space.high
     # Ensure action bound is symmetric
     # assert(env.action_space.high == -env.action_space.low)
-    # if GYM_MONITOR_EN:
-    #     if not RENDER_ENV:
-    #         env = wrappers.Monitor(
-    #             env, MONITOR_DIR, video_callable=None, force=True
-    #         )
-    #     else:
-    #         env = wrappers.Monitor(env, MONITOR_DIR, force=True)
+
 
     with tf.Session() as sess:
         tf.set_random_seed(RANDOM_SEED)
