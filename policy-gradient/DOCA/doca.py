@@ -578,8 +578,8 @@ def train(sess, env, option_critic):#, critic):
 
                 since_last_term += 1
 
-            action_probs = option_critic.predict_action([s], np.reshape(current_option, [1,1]))
-            current_action = np.argmax(np.random.multinomial(1, action_probs), axis=1)
+            action_probs = option_critic.predict_action([s], np.reshape(current_option, [1,1]))[0]
+            current_action = np.argmax(np.random.multinomial(1, action_probs))
             if print_option_stats:
                  print current_option
                  if True:
