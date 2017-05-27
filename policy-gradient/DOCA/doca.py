@@ -1,6 +1,7 @@
 import os
 import gym
 from gym import wrappers
+import numpy as np
 # ========================================
 #   Utility Parameters
 # circumvening TLS static error
@@ -18,6 +19,7 @@ MONITOR_DIR = './results/gym_ddpg'
 SUMMARY_DIR = './results/tf_ddpg'
 # Seed
 RANDOM_SEED = 1234
+np.random.seed(RANDOM_SEED)
 env = gym.make(ENV_NAME)
 env.seed(RANDOM_SEED)
 
@@ -29,12 +31,13 @@ if GYM_MONITOR_EN:
     else:
         env = wrappers.Monitor(env, MONITOR_DIR, force=True)
 
+    # env.monitor.close()
+
 
 env.reset()
 #env.render()
 from collections import deque
 import random
-import numpy as np
 
 import tensorflow as tf
 import tensorflow.contrib.slim as slim
@@ -45,9 +48,9 @@ import tensorflow.contrib.slim as slim
 # Update Frequency
 update_freq = 4
 # Max training steps
-MAX_EPISODES = 8000
+MAX_EPISODES = 8#000
 # Max episode length
-MAX_EP_STEPS = 250000
+MAX_EP_STEPS = 2500#00
 # Base learning rate for the Actor network
 ACTOR_LEARNING_RATE = 0.00025
 # Base learning rate for the Critic Network
@@ -55,7 +58,7 @@ CRITIC_LEARNING_RATE = 0.00025
 # Contributes to the nitial random walk
 MAX_START_ACTION_ATTEMPTS = 30
 # Update params
-FREEZE_INTERVAL = 10000
+FREEZE_INTERVAL = 10#000
 # Discount factor
 GAMMA = 0.99
 # Soft target update param
@@ -69,9 +72,9 @@ ANNEALING = 1000000
 # Number of options
 OPTION_DIM = 8
 # Pretrain steps
-PRE_TRAIN_STEPS = 50000
+PRE_TRAIN_STEPS = 5#0000
 # Size of replay buffer
-BUFFER_SIZE = 1000000
+BUFFER_SIZE = 100#0000
 # Minibatch size
 MINIBATCH_SIZE = 32
 
@@ -100,51 +103,133 @@ class StateProcessor():
         return sess.run(self.output, { self.input_state: state })
 
 class ReplayBuffer(object):
-    def __init__(self, buffer_size, random_seed=123):
-        self.buffer_size = buffer_size
-        self.count = 0
-        self.buffer = deque()
-        random.seed(random_seed)
+    """ Class, taken from https://github.com/jeanharb/option_critic
+       A replay memory consisting of circular buffers for observed images,
+       actions, and rewards.
+    """
+    def __init__(self, width, height, seed, max_steps=1000, phi_length=4):
+        """Construct a DataSet.
 
-    def add(self, s, o, r, t, s2):
-        experience = (s,o, r, t, s2)
-        if self.count < self.buffer_size: 
-            self.buffer.append(experience)
-            self.count += 1
+        Arguments:
+        width, height - image size
+        max_steps - the number of time steps to store
+        phi_length - number of images to concatenate into a state
+        rng - initialized numpy random number generator, used to
+        choose random minibatches
+
+        """
+        # TODO: Specify capacity in number of state transitions, not
+        # number of saved time steps.
+
+        # Store arguments.
+        self.width = width
+        self.height = height
+        self.max_steps = max_steps
+        self.phi_length = phi_length
+        np.random.seed(RANDOM_SEED)
+
+        # Allocate the circular buffers and indices.
+        self.imgs = np.zeros((height, width, max_steps), dtype='uint8')
+        self.actions = np.zeros(max_steps, dtype='int32')
+        self.rewards = np.zeros(max_steps, dtype='float32')
+        self.terminal = np.zeros(max_steps, dtype='bool')
+        
+        self.bottom = 0
+        self.top = 0
+        self.size = 0
+
+    def add_sample(self, img, action, reward, terminal):
+        """Add a time step record.
+
+        Arguments:
+        img -- observed image
+        action -- action chosen by the agent
+        reward -- reward received after taking the action
+        terminal -- boolean indicating whether the episode ended
+        after this time step
+        """
+        self.imgs[:, :, self.top] = img
+        self.actions[self.top] = action
+        self.rewards[self.top] = reward
+        self.terminal[self.top] = terminal
+
+        if self.size == self.max_steps:
+            self.bottom = (self.bottom + 1) % self.max_steps
         else:
-            self.buffer.popleft()
-            self.buffer.append(experience)
+            self.size += 1
 
-    def size(self):
-        return self.count
+        self.top = (self.top + 1) % self.max_steps
 
-    def sample_batch(self, batch_size):
-        '''     
-        batch_size specifies the number of experiences to add 
-        to the batch. If the replay buffer has less than batch_size
-        elements, simply return all of the elements within the buffer.
-        Generally, you'll want to wait until the buffer has at least 
-        batch_size elements before beginning to sample from it.
-        '''
-        batch = []
+    def __len__(self):
+        """Return an approximate count of stored state transitions."""
+        # TODO: Properly account for indices which can't be used, as in
+        # random_batch's check.
+        return max(0, self.size - self.phi_length)
 
-        if self.count < batch_size:
-            batch = random.sample(self.buffer, self.count)
-        else:
-            batch = random.sample(self.buffer, batch_size)
+    def last_phi(self):
+        """Return the most recent phi (sequence of image frames)."""
+        indexes = np.arange(self.top - self.phi_length, self.top)
+        return self.imgs.take(indexes, axis=2, mode='wrap')
 
-        s_batch = np.array([_[0] for _ in batch])
-        # a_batch = np.array([_[1] for _ in batch])
-        o_batch = np.array([_[1] for _ in batch])
-        r_batch = np.array([_[2] for _ in batch])
-        t_batch = np.array([_[3] for _ in batch])
-        s2_batch = np.array([_[4] for _ in batch])
+    def phi(self, img):
+        """Return a phi (sequence of image frames), using the last phi_length -
+        1, plus img.
 
-        return s_batch, o_batch, r_batch, t_batch, s2_batch
+        """
+        indexes = np.arange(self.top - self.phi_length + 1, self.top)
 
-    def clear(self):
-        self.deque.clear()
-        self.count = 0
+        phi = np.empty((self.phi_length, self.height, self.width), dtype='float32')
+        phi[0:self.phi_length - 1] = self.imgs.take(indexes,
+                            axis=2,
+                            mode='wrap')
+        phi[-1] = img
+        return phi
+
+    def random_batch(self, batch_size, random_selection=False):
+        """Return corresponding states, actions, rewards, terminal status, and
+            next_states for batch_size randomly chosen state transitions.
+        """
+        # Allocate the response.
+        states = np.zeros((batch_size,
+                self.height,
+                self.width,
+                self.phi_length),
+                dtype='uint8')
+        actions = np.zeros((batch_size), dtype='int32')
+        rewards = np.zeros((batch_size), dtype='float32')
+        terminal = np.zeros((batch_size), dtype='bool')
+        next_states = np.zeros((batch_size,
+                    self.height,
+                    self.width,
+                    self.phi_length),
+                    dtype='uint8')
+
+        count = 0
+        indices = np.zeros((batch_size), dtype='int32')
+        
+        while count < batch_size:
+            # Randomly choose a time step from the replay memory.
+            index = np.random.randint(self.bottom,
+                            self.bottom + self.size - self.phi_length)
+
+            initial_indices = np.arange(index, index + self.phi_length)
+            transition_indices = initial_indices + 1
+            end_index = index + self.phi_length - 1
+
+            if np.any(self.terminal.take(initial_indices[0:-1], mode='wrap')):
+                continue
+
+            indices[count] = index
+
+            # Add the state transition to the response.
+            states[count] = self.imgs.take(initial_indices, axis=2, mode='wrap')
+            actions[count] = self.actions.take(end_index, mode='wrap')
+            rewards[count] = self.rewards.take(end_index, mode='wrap')
+            terminal[count] = self.terminal.take(end_index, mode='wrap')
+            next_states[count] = self.imgs.take(transition_indices, axis=2,mode='wrap')
+            count += 1
+
+        return states, actions, rewards, next_states, terminal
 
 class OptionsNetwork(object):
     def __init__(self, sess, h_size, temp, state_dim, action_dim, option_dim, learning_rate, tau, entropy_reg=0.01, clip_delta=0):
@@ -415,8 +500,10 @@ def build_summaries():
     tf.summary.scalar("DOCA/Total Reward", tot_reward)
     cum_reward = tf.Variable(0.)
     tf.summary.scalar("DOCA/Cummulative Reward", tot_reward)
+    rmng_frames = tf.Variable(0.)
+    tf.summary.scalar("DOCA/Remaining Frames", rmng_frames)
 
-    summary_vars = [episode_reward, episode_ave_max_q, episode_termination_ratio, tot_reward, cum_reward]
+    summary_vars = [episode_reward, episode_ave_max_q, episode_termination_ratio, tot_reward, cum_reward, rmng_frames]
     summary_ops = tf.summary.merge_all()
 
     return summary_ops, summary_vars
@@ -437,6 +524,7 @@ def get_reward(reward):
 def train(sess, env, option_critic):#, critic):
     # Set up summary Ops
     summary_ops, summary_vars = build_summaries()
+    np.random.seed(RANDOM_SEED)
 
     sess.run(tf.global_variables_initializer())
     writer = tf.summary.FileWriter(SUMMARY_DIR, sess.graph)
@@ -449,7 +537,7 @@ def train(sess, env, option_critic):#, critic):
     state_processor = StateProcessor()
 
     # Initialize replay memory
-    replay_buffer = ReplayBuffer(BUFFER_SIZE, RANDOM_SEED)
+    replay_buffer = ReplayBuffer(84, 84, RANDOM_SEED, BUFFER_SIZE, 4)
     # Set the rate of random action decrease.
     eps = START_EPS
     stepDrop = (START_EPS - END_EPS)/ANNEALING
@@ -490,9 +578,8 @@ def train(sess, env, option_critic):#, critic):
 
                 since_last_term += 1
 
-            action_probs = option_critic.predict_action([s], np.reshape(current_option, [1,1]))[0]
-            # looks dodgy, why is it not categorical and why divide by 6?
-            current_action = np.argmax(np.random.multinomial(1, action_probs/6.0))
+            action_probs = option_critic.predict_action([s], np.reshape(current_option, [1,1]))
+            current_action = np.argmax(np.random.multinomial(1, action_probs), axis=1)
             if print_option_stats:
                  print current_option
                  if True:
@@ -518,8 +605,7 @@ def train(sess, env, option_critic):#, critic):
             score, reward = get_reward(reward)
             total_steps += 1
 
-            replay_buffer.add(s, 
-                current_option, score, done, s2)
+            replay_buffer.add_sample(s[:,:,-1], current_option, score, done)
 
             term = option_critic.predict_termination([s2], [[current_option]])
             option_term_ps, Q = term[0], term[1]
@@ -545,9 +631,9 @@ def train(sess, env, option_critic):#, critic):
 
                     # Keep adding experience to the memory until
                     # there are at least minibatch size samples
-                    if replay_buffer.size() > MINIBATCH_SIZE:
-                        s_batch, o_batch, score_batch, done_batch, s2_batch = \
-                            replay_buffer.sample_batch(MINIBATCH_SIZE)
+                    if len(replay_buffer) > MINIBATCH_SIZE:
+                        s_batch, o_batch, score_batch, s2_batch, done_batch = \
+                            replay_buffer.random_batch(MINIBATCH_SIZE)
 
                         _ = option_critic.train_critic(
                                 s_batch, s2_batch,  np.reshape(o_batch, [MINIBATCH_SIZE, 1]),  np.reshape(score_batch, [MINIBATCH_SIZE, 1]), np.reshape(done_batch+0, [MINIBATCH_SIZE, 1]))
@@ -566,7 +652,8 @@ def train(sess, env, option_critic):#, critic):
                     summary_vars[1]:ep_ave_max_q / float(j),
                     summary_vars[2]:float(termination_counter) / float(j),
                     summary_vars[3]:total_reward,
-                    summary_vars[4]:total_reward/float(i+1)
+                    summary_vars[4]:total_reward/float(i+1),
+                    symmary_vars[5]:(MAX_EP_STEPS-j)
                 })
 
                 writer.add_summary(summary_str, i)
@@ -575,7 +662,9 @@ def train(sess, env, option_critic):#, critic):
                 break
 
         print '| Reward: %.2i' % int(ep_reward), " | Episode", i, \
-            '| Qmax: %.4f' % (ep_ave_max_q / float(j)), ' | Cummulative Reward: %.1f' % (total_reward/(i+1))
+            '| Qmax: %.4f' % (ep_ave_max_q / float(j)), ' | Cummulative Reward: %.1f' % (total_reward/(i+1)), \
+            ' | %d Remaining Frames: ' %(MAX_EP_STEPS-j), \
+            ' Epsilon: %.4f'%eps
 
 def main(_):
     # if not os.path.exists(MONITOR_DIR):
@@ -583,8 +672,6 @@ def main(_):
 
     if not os.path.exists(SUMMARY_DIR):
         os.makedirs(SUMMARY_DIR)
-
-    np.random.seed(RANDOM_SEED)
 
     state_dim = env.observation_space.shape[0]
     action_dim = env.action_space.n
@@ -605,8 +692,8 @@ def main(_):
 
         train(sess, env, option_critic)#, critic)
 
-    if GYM_MONITOR_EN:
-        env.monitor.close()
+    # if GYM_MONITOR_EN:
+    #     env.monitor.close()
 
 if __name__ == '__main__':
     tf.app.run()
