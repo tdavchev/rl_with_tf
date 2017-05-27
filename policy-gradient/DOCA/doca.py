@@ -8,8 +8,6 @@ from gym import wrappers
 # ========================================
 # Render gym env during training
 RENDER_ENV = False
-# Pretrain steps
-PRE_TRAIN_STEPS = 50000
 # Use Gym Monitor
 GYM_MONITOR_EN = True
 # Gym environment
@@ -70,6 +68,8 @@ END_EPS = 0.05
 ANNEALING = 1000000
 # Number of options
 OPTION_DIM = 8
+# Pretrain steps
+PRE_TRAIN_STEPS = 50000
 # Size of replay buffer
 BUFFER_SIZE = 1000000
 # Minibatch size
