@@ -48,9 +48,9 @@ import tensorflow.contrib.slim as slim
 # Update Frequency
 update_freq = 4
 # Max training steps
-MAX_EPISODES = 8#000
+MAX_EPISODES = 8000
 # Max episode length
-MAX_EP_STEPS = 2500#00
+MAX_EP_STEPS = 250000
 # Base learning rate for the Actor network
 ACTOR_LEARNING_RATE = 0.00025
 # Base learning rate for the Critic Network
@@ -58,7 +58,7 @@ CRITIC_LEARNING_RATE = 0.00025
 # Contributes to the nitial random walk
 MAX_START_ACTION_ATTEMPTS = 30
 # Update params
-FREEZE_INTERVAL = 10#000
+FREEZE_INTERVAL = 10000
 # Discount factor
 GAMMA = 0.99
 # Soft target update param
@@ -72,9 +72,9 @@ ANNEALING = 1000000
 # Number of options
 OPTION_DIM = 8
 # Pretrain steps
-PRE_TRAIN_STEPS = 5#0000
+PRE_TRAIN_STEPS = 50000
 # Size of replay buffer
-BUFFER_SIZE = 100#0000
+BUFFER_SIZE = 1000000
 # Minibatch size
 MINIBATCH_SIZE = 32
 
@@ -653,7 +653,7 @@ def train(sess, env, option_critic):#, critic):
                     summary_vars[2]:float(termination_counter) / float(j),
                     summary_vars[3]:total_reward,
                     summary_vars[4]:total_reward/float(i+1),
-                    symmary_vars[5]:(MAX_EP_STEPS-j)
+                    summary_vars[5]:(MAX_EP_STEPS-j)
                 })
 
                 writer.add_summary(summary_str, i)
