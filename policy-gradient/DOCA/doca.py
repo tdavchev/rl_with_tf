@@ -8,7 +8,7 @@ RANDOM_SEED = 1234
 env = gym.make(ENV_NAME)
 env.seed(RANDOM_SEED)
 env.reset()
-env.render()
+#env.render()
 from collections import deque
 import random
 import numpy as np
@@ -48,7 +48,7 @@ ANNEALING = 1000000
 #   Utility Parameters
 # ===========================
 # Render gym env during training
-RENDER_ENV = True
+RENDER_ENV = False
 # Pretrain steps
 PRE_TRAIN_STEPS = 50000
 # Use Gym Monitor
@@ -475,9 +475,7 @@ def train(sess, env, option_critic):#, critic):
 
                 termination_counter += 1
                 since_last_term = 1
-                current_option = np.random.randint(OPTION_DIM) \
-                    if (np.random.rand(1) < eps and total_steps < PRE_TRAIN_STEPS) \
-                    else new_option
+                current_option = np.random.randint(OPTION_DIM) if np.random.rand() < eps else new_option
             else:
                 if print_option_stats:
                     print "keep going"
