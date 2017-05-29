@@ -89,7 +89,9 @@ class StateProcessor():
             self.input_state = tf.placeholder(shape=[210, 160, 3], dtype=tf.uint8)
             self.output = tf.image.rgb_to_grayscale(self.input_state)
             self.output = tf.image.crop_to_bounding_box(self.output, 34, 0, 160, 160)
-            self.output = tf.image.resize_images(self.output, (84, 84), method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
+            self.output = tf.image.resize_images(
+                self.output, (84, 84),
+                method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
             self.output = tf.squeeze(self.output)
 
     def process(self, sess, state):
@@ -133,7 +135,7 @@ class ReplayBuffer(object):
         self.actions = np.zeros(max_steps, dtype='int32')
         self.rewards = np.zeros(max_steps, dtype='float32')
         self.terminal = np.zeros(max_steps, dtype='bool')
-        
+
         self.bottom = 0
         self.top = 0
         self.size = 0
@@ -179,9 +181,7 @@ class ReplayBuffer(object):
         indexes = np.arange(self.top - self.phi_length + 1, self.top)
 
         phi = np.empty((self.phi_length, self.height, self.width), dtype='float32')
-        phi[0:self.phi_length - 1] = self.imgs.take(indexes,
-                            axis=2,
-                            mode='wrap')
+        phi[0:self.phi_length - 1] = self.imgs.take(indexes, axis=2, mode='wrap')
         phi[-1] = img
         return phi
 
@@ -190,27 +190,20 @@ class ReplayBuffer(object):
             next_states for batch_size randomly chosen state transitions.
         """
         # Allocate the response.
-        states = np.zeros((batch_size,
-                self.height,
-                self.width,
-                self.phi_length),
-                dtype='uint8')
+        states = np.zeros(
+            (batch_size, self.height, self.width, self.phi_length), dtype='uint8')
         actions = np.zeros((batch_size), dtype='int32')
         rewards = np.zeros((batch_size), dtype='float32')
         terminal = np.zeros((batch_size), dtype='bool')
-        next_states = np.zeros((batch_size,
-                    self.height,
-                    self.width,
-                    self.phi_length),
-                    dtype='uint8')
+        next_states = np.zeros(
+            (batch_size, self.height, self.width, self.phi_length), dtype='uint8')
 
         count = 0
         indices = np.zeros((batch_size), dtype='int32')
-        
+
         while count < batch_size:
             # Randomly choose a time step from the replay memory.
-            index = np.random.randint(self.bottom,
-                            self.bottom + self.size - self.phi_length)
+            index = np.random.randint(self.bottom, self.bottom + self.size - self.phi_length)
 
             initial_indices = np.arange(index, index + self.phi_length)
             transition_indices = initial_indices + 1
@@ -226,13 +219,14 @@ class ReplayBuffer(object):
             actions[count] = self.actions.take(end_index, mode='wrap')
             rewards[count] = self.rewards.take(end_index, mode='wrap')
             terminal[count] = self.terminal.take(end_index, mode='wrap')
-            next_states[count] = self.imgs.take(transition_indices, axis=2,mode='wrap')
+            next_states[count] = self.imgs.take(transition_indices, axis=2, mode='wrap')
             count += 1
 
         return states, actions, rewards, next_states, terminal
 
 class OptionsNetwork(object):
-    def __init__(self, sess, h_size, temp, state_dim, action_dim, option_dim, learning_rate, tau, entropy_reg=0.01, clip_delta=0):
+    def __init__(self, sess, h_size, temp, state_dim, action_dim,
+                 option_dim, learning_rate, tau, entropy_reg=0.01, clip_delta=0):
         self.sess = sess
         self.h_size = h_size
         self.s_dim = state_dim
@@ -246,12 +240,15 @@ class OptionsNetwork(object):
         # State Network
         self.inputs = tf.placeholder(shape=[None, 84, 84, 4], dtype=tf.uint8, name="inputs")
         scaledImage = tf.to_float(self.inputs) / 255.0
-        self.next_inputs = tf.placeholder(shape=[None, 84, 84, 4], dtype=tf.uint8, name="next_inputs")
+        self.next_inputs = tf.placeholder(
+            shape=[None, 84, 84, 4],
+            dtype=tf.uint8,
+            name="next_inputs")
         next_scaledImage = tf.to_float(self.next_inputs) / 255.0
         with tf.variable_scope("state_out") as scope:
             self.state_out = self.apply_state_model(scaledImage)
-            scope.reuse_variables()                                                                                              
-            self.next_state_out =  self.apply_state_model(next_scaledImage)
+            scope.reuse_variables()
+            self.next_state_out = self.apply_state_model(next_scaledImage)
 
         with tf.variable_scope("q_out") as q_scope:
             # self.state_out = self.create_state_network(scaledImage)
@@ -263,29 +260,33 @@ class OptionsNetwork(object):
         self.Q_params = tf.trainable_variables()[-2:]
 
         # Prime Network
-        self.target_inputs = tf.placeholder(shape=[None, 84, 84, 4], dtype=tf.uint8, name="target_inputs")
+        self.target_inputs = tf.placeholder(
+            shape=[None, 84, 84, 4],
+            dtype=tf.uint8,
+            name="target_inputs")
         target_scaledImage = tf.to_float(self.target_inputs) / 255.0
         self.target_state_out_holder = self.create_state_network(target_scaledImage)
         self.target_state_out_holder = tf.squeeze(self.target_state_out_holder, [1])
         with tf.variable_scope("target_q_out") as target_q_scope:
             self.target_Q_out = self.apply_target_q_model(self.target_state_out_holder)
             target_q_scope.reuse_variables()
-        self.target_network_params = tf.trainable_variables()[len(self.network_params)+len(self.Q_params):-2]
+        self.target_network_params = tf.trainable_variables()[
+            len(self.network_params)+len(self.Q_params):-2]
         self.target_Q_params = tf.trainable_variables()[-2:]
 
         # Op for periodically updating target network with online network
         # weights
         self.update_target_network_params = \
             [self.target_network_params[i].assign(
-                    tf.multiply(self.network_params[i], self.tau) + \
-                    tf.multiply(self.target_network_params[i], 1. - self.tau))
-                for i in range(len(self.target_network_params))]
+                tf.multiply(self.network_params[i], self.tau) + \
+                tf.multiply(self.target_network_params[i], 1. - self.tau))
+             for i in range(len(self.target_network_params))]
 
         self.update_target_q_params = \
             [self.target_Q_params[i].assign(
-                    tf.multiply(self.Q_params[i], self.tau) + \
-                    tf.multiply(self.target_Q_params[i], 1. - self.tau))
-                for i in range(len(self.target_Q_params))]
+                tf.multiply(self.Q_params[i], self.tau) + \
+                tf.multiply(self.target_Q_params[i], 1. - self.tau))
+             for i in range(len(self.target_Q_params))]
 
         # gather_nd should also do, though this is sexier
         self.option = tf.placeholder(tf.int32, [None, 1], name="option")
@@ -294,26 +295,32 @@ class OptionsNetwork(object):
         self.options_onehot = tf.squeeze(tf.one_hot(self.option, self.o_dim, dtype=tf.float32), [1])
 
         # Action Network
-        self.action_input = tf.concat(1,
-            [self.state_out, self.state_out, self.state_out, self.state_out, self.state_out, self.state_out, self.state_out, self.state_out])
+        self.action_input = tf.concat(
+            [self.state_out, self.state_out, self.state_out, self.state_out,
+             self.state_out, self.state_out, self.state_out, self.state_out], 1)
         self.action_input = tf.reshape(self.action_input, shape=[-1, self.o_dim, 1, self.h_size])
         oh = tf.reshape(self.options_onehot, shape=[-1, self.o_dim, 1])
-        self.action_input = tf.reshape(tf.reduce_sum(tf.squeeze(self.action_input, [2]) * oh, [1]), shape=[-1, 1, self.h_size])
+        self.action_input = tf.reshape(
+            tf.reduce_sum(
+                tf.squeeze(
+                    self.action_input, [2]) * oh, [1]),
+            shape=[-1, 1, self.h_size])
 
         self.action_probs = tf.contrib.layers.fully_connected(
-                inputs=self.action_input,
-                num_outputs=self.a_dim,
-                activation_fn=tf.nn.softmax)
+            inputs=self.action_input,
+            num_outputs=self.a_dim,
+            activation_fn=tf.nn.softmax)
         self.action_probs = tf.squeeze(self.action_probs, [1])
         self.action_params = tf.trainable_variables()[
-            len(self.network_params) + len(self.target_network_params) + len(self.Q_params) + len(self.target_Q_params):]
+            len(self.network_params) + len(self.target_network_params) + \
+            len(self.Q_params) + len(self.target_Q_params):]
         # always draws 0 ...
         # self.sampled_action = tf.argmax(tf.multinomial(self.action_probs, 1), axis=1)
 
         # Termination Network
         with tf.variable_scope("termination_probs") as term_scope:
             self.termination_probs = self.apply_termination_model(tf.stop_gradient(self.state_out))
-            term_scope.reuse_variables()                                                                                              
+            term_scope.reuse_variables()
             self.next_termination_probs =  self.apply_termination_model(tf.stop_gradient(self.next_state_out))
 
         self.termination_params = tf.trainable_variables()[-2:]
@@ -354,8 +361,8 @@ class OptionsNetwork(object):
         self.critic_cost = tf.reduce_sum(td_cost)
         critic_params = self.network_params + self.Q_params
         grads = tf.gradients(self.critic_cost, critic_params)
-        self.critic_updates = tf.train.RMSPropOptimizer(self.learning_rate, decay=0.95, epsilon=0.01).\
-            apply_gradients(zip(grads, critic_params))
+        self.critic_updates = tf.train.RMSPropOptimizer(
+            self.learning_rate, decay=0.95, epsilon=0.01).apply_gradients(zip(grads, critic_params))
 
         # actor updates
         self.value = tf.stop_gradient(tf.reduce_max(self.Q_out, reduction_indices=[1]))
@@ -368,12 +375,13 @@ class OptionsNetwork(object):
         self.term_gradient = tf.reduce_sum(self.option_term_prob*(self.disc_q - self.value))
         self.loss = self.term_gradient+policy_gradient
         grads = tf.gradients(self.loss, actor_params)
-        self.actor_updates = tf.train.RMSPropOptimizer(self.learning_rate, decay=0.95, epsilon=0.01).\
-            apply_gradients(zip(grads, actor_params))
+        self.actor_updates = tf.train.RMSPropOptimizer(
+            self.learning_rate, decay=0.95, epsilon=0.01).apply_gradients(zip(grads, actor_params))
 
     def apply_state_model(self, input_image):
         with tf.variable_scope("input"):   
-            output = self.state_model(input_image, [8, 8, 4, 32], [4, 4, 32, 64], [3, 3, 64, 64], [7, 7, 64, 512], [512, 512])
+            output = self.state_model(
+                input_image, [[8, 8, 4, 32], [4, 4, 32, 64], [3, 3, 64, 64], [7, 7, 64, 512]], [[512, 512]])
         return output
 
     def apply_q_model(self, input):
@@ -391,13 +399,26 @@ class OptionsNetwork(object):
             output = self.termination_model(input, [self.h_size, self.o_dim])
         return output
 
-    def state_model(self, input, kernel_shape1, kernel_shape2, kernel_shape3, kernel_shape4, weight_shape):
-        weights1 = tf.get_variable("weights1", kernel_shape1, initializer=tf.contrib.layers.xavier_initializer())
-        weights2 = tf.get_variable("weights2", kernel_shape2, initializer=tf.contrib.layers.xavier_initializer())
-        weights3 = tf.get_variable("weights3", kernel_shape3, initializer=tf.contrib.layers.xavier_initializer())
-        weights4 = tf.get_variable("weights4", kernel_shape4, initializer=tf.contrib.layers.xavier_initializer())
-        weights5 = tf.get_variable("weights5", weight_shape, initializer=tf.contrib.layers.xavier_initializer())
-        bias1 = tf.get_variable("q_bias1", weight_shape[1], initializer=tf.constant_initializer())
+    def state_model(self, input, kernel_shapes, weight_shapes):
+        weights1 = tf.get_variable(
+            "weights1", kernel_shapes[0],
+            initializer=tf.contrib.layers.xavier_initializer())
+        weights2 = tf.get_variable(
+            "weights2", kernel_shapes[1],
+            initializer=tf.contrib.layers.xavier_initializer())
+        weights3 = tf.get_variable(
+            "weights3", kernel_shapes[2],
+            initializer=tf.contrib.layers.xavier_initializer())
+        weights4 = tf.get_variable(
+            "weights4", kernel_shapes[3],
+            initializer=tf.contrib.layers.xavier_initializer())
+        weights5 = tf.get_variable(
+            "weights5", weight_shapes[0],
+            initializer=tf.contrib.layers.xavier_initializer())
+        bias1 = tf.get_variable(
+            "q_bias1", weight_shapes[0][1],
+            initializer=tf.constant_initializer())
+        # Convolve
         conv1 = tf.nn.relu(tf.nn.conv2d(input, weights1, strides=[1, 4, 4, 1], padding='VALID'))
         conv2 = tf.nn.relu(tf.nn.conv2d(conv1, weights2, strides=[1, 2, 2, 1], padding='VALID'))
         conv3 = tf.nn.relu(tf.nn.conv2d(conv2, weights3, strides=[1, 1, 1, 1], padding='VALID'))
@@ -407,24 +428,36 @@ class OptionsNetwork(object):
         return net
 
     def target_q_model(self, input, weight_shape):
-        weights1 = tf.get_variable("target_q_weights1", weight_shape, initializer=tf.contrib.layers.xavier_initializer())
-        bias1 = tf.get_variable("target_q_bias1", weight_shape[1], initializer=tf.constant_initializer())
+        weights1 = tf.get_variable(
+            "target_q_weights1", weight_shape,
+            initializer=tf.contrib.layers.xavier_initializer())
+        bias1 = tf.get_variable(
+            "target_q_bias1", weight_shape[1],
+            initializer=tf.constant_initializer())
         return tf.nn.xw_plus_b(tf.squeeze(input, [1]), weights1, bias1)
 
     def q_model(self, input, weight_shape):
-        weights1 = tf.get_variable("q_weights1", weight_shape, initializer=tf.contrib.layers.xavier_initializer())
-        bias1 = tf.get_variable("q_bias1", weight_shape[1], initializer=tf.constant_initializer())
+        weights1 = tf.get_variable(
+            "q_weights1", weight_shape,
+            initializer=tf.contrib.layers.xavier_initializer())
+        bias1 = tf.get_variable(
+            "q_bias1", weight_shape[1],
+            initializer=tf.constant_initializer())
         return tf.nn.xw_plus_b(input, weights1, bias1)
 
     def termination_model(self, input, weight_shape):
-        weights1 = tf.get_variable("term_weights1", weight_shape, initializer=tf.contrib.layers.xavier_initializer())
-        bias1 = tf.get_variable("term_bias1", weight_shape[1], initializer=tf.constant_initializer())
+        weights1 = tf.get_variable(
+            "term_weights1", weight_shape,
+            initializer=tf.contrib.layers.xavier_initializer())
+        bias1 = tf.get_variable(
+            "term_bias1", weight_shape[1],
+            initializer=tf.constant_initializer())
         return tf.nn.sigmoid(tf.nn.xw_plus_b(input, weights1, bias1))
 
     def create_state_network(self, scaledImage):
         # inputs = tf.placeholder(shape=[None, self.s_dim], dtype=tf.float32)
         conv1 = slim.conv2d( \
-            inputs=scaledImage, num_outputs=32, kernel_size=[8,8], stride=[4,4],
+            inputs=scaledImage, num_outputs=32, kernel_size=[8, 8], stride=[4, 4],
             padding='VALID', biases_initializer=None)
         conv2 = slim.conv2d(\
             inputs=conv1, num_outputs=64, kernel_size=[4, 4], stride=[2, 2],
@@ -433,12 +466,12 @@ class OptionsNetwork(object):
             inputs=conv2, num_outputs=64, kernel_size=[3, 3], stride=[1, 1],
             padding='VALID', biases_initializer=None)
         conv4 = slim.convolution2d( \
-                inputs=conv3, num_outputs=self.h_size, kernel_size=[7,7], stride=[1,1],
-                padding='VALID', biases_initializer=None)
+            inputs=conv3, num_outputs=self.h_size, kernel_size=[7, 7], stride=[1, 1],
+            padding='VALID', biases_initializer=None)
         net = tf.contrib.layers.fully_connected(
-                inputs=conv4,
-                num_outputs=self.h_size,
-                activation_fn=tf.nn.relu)
+            inputs=conv4,
+            num_outputs=self.h_size,
+            activation_fn=tf.nn.relu)
 
         return net
 
@@ -503,7 +536,9 @@ def build_summaries():
     rmng_frames = tf.Variable(0.)
     tf.summary.scalar("DOCA/Remaining Frames", rmng_frames)
 
-    summary_vars = [episode_reward, episode_ave_max_q, episode_termination_ratio, tot_reward, cum_reward, rmng_frames]
+    summary_vars = [
+        episode_reward, episode_ave_max_q,
+        episode_termination_ratio, tot_reward, cum_reward, rmng_frames]
     summary_ops = tf.summary.merge_all()
 
     return summary_ops, summary_vars
@@ -553,7 +588,8 @@ def train(sess, env, option_critic):#, critic):
         s = np.stack([s] * 4, axis=2)
         current_option = 0
         current_action = 0
-        new_option = np.argmax(option_critic.predict(s))#+ (1./(1. + i)) # state has more than 3 features in pong
+        new_option = np.argmax(option_critic.predict(s))
+        #+ (1./(1. + i)) # state has more than 3 features in pong
         done = False
         termination = True
         ep_reward = 0
@@ -571,18 +607,19 @@ def train(sess, env, option_critic):#, critic):
 
                 termination_counter += 1
                 since_last_term = 1
-                current_option = np.random.randint(OPTION_DIM) if np.random.rand() < eps else new_option
+                current_option = np.random.randint(OPTION_DIM) \
+                    if np.random.rand() < eps else new_option
             else:
                 if print_option_stats:
                     print "keep going"
 
                 since_last_term += 1
 
-            action_probs = option_critic.predict_action([s], np.reshape(current_option, [1,1]))[0]
+            action_probs = option_critic.predict_action([s], np.reshape(current_option, [1, 1]))[0]
             current_action = np.argmax(np.random.multinomial(1, action_probs))
             if print_option_stats:
-                 print current_option
-                 if True:
+                print current_option
+                if True:
                     action_counter[current_option][current_action] += 1
                     data_table = []
                     option_count = []
@@ -601,21 +638,21 @@ def train(sess, env, option_critic):#, critic):
 
             s2, reward, done, info = env.step(current_action)
             s2 = state_processor.process(sess, s2)
-            s2 = np.append(s[:,:,1:], np.expand_dims(s2, 2), axis=2)
+            s2 = np.append(s[:, :, 1:], np.expand_dims(s2, 2), axis=2)
             score, reward = get_reward(reward)
             total_steps += 1
 
-            replay_buffer.add_sample(s[:,:,-1], current_option, score, done)
+            replay_buffer.add_sample(s[:, :, -1], current_option, score, done)
 
             term = option_critic.predict_termination([s2], [[current_option]])
             option_term_ps, Q = term[0], term[1]
             ep_ave_max_q += np.max(Q)
             new_option = np.argmax(Q)
             randomize = np.random.uniform(size=np.asarray([0]).shape)
-            termination = option_term_ps if termination>=randomize else randomize
+            termination = option_term_ps if termination >= randomize else randomize
             if total_steps < PRE_TRAIN_STEPS:
-               termination = 1
-            
+                termination = 1
+
             if total_steps > PRE_TRAIN_STEPS:
                 if eps > END_EPS:
                     eps -= stepDrop
@@ -623,7 +660,11 @@ def train(sess, env, option_critic):#, critic):
                 # done in the original paper, actor is trained on current data
                 # critic trained on sampled one
                 _ = option_critic.train_actor(
-                        [s], [s2], np.reshape(current_option, [1, 1]), np.reshape(current_action, [1, 1]), np.reshape(score, [1, 1]), np.reshape(done+0, [1, 1]))
+                    [s], [s2],
+                    np.reshape(current_option, [1, 1]),
+                    np.reshape(current_action, [1, 1]),
+                    np.reshape(score, [1, 1]),
+                    np.reshape(done+0, [1, 1]))
 
                 if total_steps % (update_freq) == 0:
                     if RENDER_ENV:
@@ -636,7 +677,10 @@ def train(sess, env, option_critic):#, critic):
                             replay_buffer.random_batch(MINIBATCH_SIZE)
 
                         _ = option_critic.train_critic(
-                                s_batch, s2_batch,  np.reshape(o_batch, [MINIBATCH_SIZE, 1]),  np.reshape(score_batch, [MINIBATCH_SIZE, 1]), np.reshape(done_batch+0, [MINIBATCH_SIZE, 1]))
+                            s_batch, s2_batch,
+                            np.reshape(o_batch, [MINIBATCH_SIZE, 1]),
+                            np.reshape(score_batch, [MINIBATCH_SIZE, 1]),
+                            np.reshape(done_batch+0, [MINIBATCH_SIZE, 1]))
 
                 if total_steps % (FREEZE_INTERVAL) == 0:
                     # Update target networks
@@ -662,7 +706,8 @@ def train(sess, env, option_critic):#, critic):
                 break
 
         print '| Reward: %.2i' % int(ep_reward), " | Episode", i, \
-            '| Qmax: %.4f' % (ep_ave_max_q / float(j)), ' | Cummulative Reward: %.1f' % (total_reward/(i+1)), \
+            '| Qmax: %.4f' % (ep_ave_max_q / float(j)), \
+            ' | Cummulative Reward: %.1f' % (total_reward/(i+1)), \
             ' | %d Remaining Frames: ' %(MAX_EP_STEPS-j), \
             ' Epsilon: %.4f'%eps
 
