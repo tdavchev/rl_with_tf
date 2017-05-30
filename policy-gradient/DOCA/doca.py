@@ -1,7 +1,6 @@
 
 import os
 import random
-# env.render()
 from collections import deque
 
 import gym
@@ -12,8 +11,6 @@ from gym import wrappers
 
 # ========================================
 #   Utility Parameters
-# circumvening TLS static error
-# Init here temporary until os update...
 # ========================================
 # Render gym env during training
 RENDER_ENV = False
@@ -27,23 +24,6 @@ MONITOR_DIR = './results/gym_ddpg'
 SUMMARY_DIR = './results/tf_ddpg'
 # Seed
 RANDOM_SEED = 1234
-np.random.seed(RANDOM_SEED)
-env = gym.make(ENV_NAME)
-env.seed(RANDOM_SEED)
-
-if GYM_MONITOR_EN:
-    if not RENDER_ENV:
-        env = wrappers.Monitor(
-            env, MONITOR_DIR, video_callable=None, force=True
-        )
-    else:
-        env = wrappers.Monitor(env, MONITOR_DIR, force=True)
-
-    # env.monitor.close()
-
-
-env.reset()
-
 
 # ==========================
 #   Training Parameters
@@ -71,7 +51,7 @@ TAU = 0.001
 # Starting chance of random action
 START_EPS = 1
 # Final chance of random action
-END_EPS = 0.05
+END_EPS = 0.1
 # How many steps of training to reduce startE to endE.
 ANNEALING = 1000000
 # Number of options
@@ -625,10 +605,6 @@ def train(sess, env, option_critic):  # , critic):
 
     # Initialize replay memory
     replay_buffer = ReplayBuffer(84, 84, RANDOM_SEED, BUFFER_SIZE, 4)
-    # Set the rate of random action decrease.
-    # eps = START_EPS
-    # stepDrop = (START_EPS - END_EPS) / ANNEALING
-
     total_steps = 0
     print_option_stats = False
 
@@ -684,8 +660,7 @@ def train(sess, env, option_critic):  # , critic):
                     [s], np.reshape(current_option, [1, 1]))[0]
                 current_action = np.argmax(np.random.multinomial(1, action_probs))
                 if print_option_stats:
-                    print current_option
-                    if True:
+                    if print_option_stats:
                         action_counter[current_option][current_action] += 1
                         data_table = []
                         option_count = []
@@ -773,8 +748,8 @@ def train(sess, env, option_critic):  # , critic):
                     break
 
             term_ratio = float(termination_counter) / float(episode_counter)
-            print '| Reward: %.2i' % int(ep_reward), " | Episode", (start_frames + episode_counter), \
-                '| Qmax: %.4f' % (ep_ave_max_q / float(episode_counter)), \
+            print '| Reward: %.2i' % int(ep_reward), " | Episode %d" % (counter + 1 ), \
+                ' | Qmax: %.4f' % (ep_ave_max_q / float(episode_counter)), \
                 ' | Cummulative Reward: %.1f' % (total_reward / float(counter + 1)), \
                 ' | %d Remaining Frames' % (MAX_EP_STEPS - (episode_counter - start_frames)), \
                 ' | Epsilon: %.4f' % eps, " | Termination Ratio: %.2f" % (100*term_ratio)
@@ -782,11 +757,26 @@ def train(sess, env, option_critic):  # , critic):
 
 
 def main(_):
-    # if not os.path.exists(MONITOR_DIR):
-    #     os.makedirs(MONITOR_DIR)
+    if not os.path.exists(MONITOR_DIR):
+        os.makedirs(MONITOR_DIR)
 
     if not os.path.exists(SUMMARY_DIR):
         os.makedirs(SUMMARY_DIR)
+
+    np.random.seed(RANDOM_SEED)
+    env = gym.make(ENV_NAME)
+    env.seed(RANDOM_SEED)
+
+    if GYM_MONITOR_EN:
+        if not RENDER_ENV:
+            env = wrappers.Monitor(
+                env, MONITOR_DIR, video_callable=None, force=True
+            )
+        else:
+            env = wrappers.Monitor(env, MONITOR_DIR, force=True)
+
+    env.reset()
+
 
     state_dim = env.observation_space.shape[0]
     action_dim = env.action_space.n
@@ -803,9 +793,8 @@ def main(_):
         # sess, h_size, temp, state_dim, action_dim, option_dim, action_bound, learning_rate, tau
         option_critic = OptionsNetwork(
             sess, 512, 1, state_dim, action_dim, 8, ACTOR_LEARNING_RATE, TAU, clip_delta=1)
-        # critic = CriticNetwork(sess, state_dim, action_dim, CRITIC_LEARNING_RATE, TAU, actor.get_num_trainable_vars)
 
-        train(sess, env, option_critic)  # , critic)
+        train(sess, env, option_critic)
 
     # if GYM_MONITOR_EN:
     #     env.monitor.close()
