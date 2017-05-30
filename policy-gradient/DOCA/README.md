@@ -1,5 +1,3 @@
-<img src="data/logo.jpg" width=25% align="right" />
-
 # The Option-Critic Architecture (Bacon PL, Harb J, Precup D)
 
 This is a TensorFlow implementation of the option critic architecture (Bacon PL, Harb J, Precup D) arXiv preprint arXiv:1609.05140. 2016 Sep 16. 
