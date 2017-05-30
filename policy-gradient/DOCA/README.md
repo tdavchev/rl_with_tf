@@ -1,5 +1,6 @@
 # The Option-Critic Architecture
-####(Bacon PL, Harb J, Precup D)
+
+#### (Bacon PL, Harb J, Precup D)
 
 This is a TensorFlow implementation of the option critic architecture (Bacon PL, Harb J, Precup D) arXiv preprint arXiv:1609.05140. 2016 Sep 16. 
 The release of the code was influenced by the recent baseline release from [OpenAI](https://github.com/openai/baselines) and is aimed to serve as a baseline in the options learning aspect of the increasingly popularized Hierarchical RL.
