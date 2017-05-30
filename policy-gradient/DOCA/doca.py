@@ -24,6 +24,7 @@ MONITOR_DIR = './results/gym_ddpg'
 SUMMARY_DIR = './results/tf_ddpg'
 # Seed
 RANDOM_SEED = 1234
+np.random.seed(RANDOM_SEED)
 
 # ==========================
 #   Training Parameters
@@ -577,10 +578,10 @@ def get_reward(reward):
 
 def get_epsilon(frame_count):
     #linear descent from 1 to 0.1 starting at the replay_start_time
-    replay_start_time = max([frame_count-PRE_TRAIN_STEPS, 0])
+    replay_start_time = max([float(frame_count)-PRE_TRAIN_STEPS, 0])
     epsilon = START_EPS
     epsilon -= (START_EPS - END_EPS)*\
-      (min(replay_start_time, ANNEALING)/ANNEALING)
+      (min(replay_start_time, ANNEALING)/float(ANNEALING))
     return epsilon
 
 # ===========================
@@ -639,6 +640,7 @@ def train(sess, env, option_critic):  # , critic):
             episode_counter = 0
 
             while not game_over:
+                total_steps += 1
                 episode_counter += 1
                 eps = get_epsilon(total_steps)
 
@@ -684,7 +686,6 @@ def train(sess, env, option_critic):  # , critic):
                 game_over = done or (total_steps-start_frame_count) > MAX_STEPS
 
                 total_reward += reward
-                total_steps += 1
 
                 replay_buffer.add_sample(s[:, :, -1], current_option, score, game_over)
 
@@ -751,7 +752,7 @@ def train(sess, env, option_critic):  # , critic):
             print '| Reward: %.2i' % int(ep_reward), " | Episode %d" % (counter + 1 ), \
                 ' | Qmax: %.4f' % (ep_ave_max_q / float(episode_counter)), \
                 ' | Cummulative Reward: %.1f' % (total_reward / float(counter + 1)), \
-                ' | %d Remaining Frames' % (MAX_EP_STEPS - (episode_counter - start_frames)), \
+                ' | %d Remaining Frames' % (MAX_EP_STEPS - (total_steps - start_frames)), \
                 ' | Epsilon: %.4f' % eps, " | Termination Ratio: %.2f" % (100*term_ratio)
             counter += 1
 
