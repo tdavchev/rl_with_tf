@@ -24,7 +24,7 @@ MONITOR_DIR = './results/gym_ddpg'
 SUMMARY_DIR = './results/tf_ddpg'
 # Seed
 RANDOM_SEED = 1234
-np.random.seed(RANDOM_SEED)
+# np.random.seed(RANDOM_SEED)
 
 # ==========================
 #   Training Parameters
@@ -101,7 +101,7 @@ class ReplayBuffer(object):
        actions, and rewards.
     """
 
-    def __init__(self, width, height, seed, max_steps=1000, phi_length=4):
+    def __init__(self, width, height, rng, max_steps=1000, phi_length=4):
         """Construct a DataSet.
 
         Arguments:
@@ -120,7 +120,8 @@ class ReplayBuffer(object):
         self.height = height
         self.max_steps = max_steps
         self.phi_length = phi_length
-        np.random.seed(RANDOM_SEED)
+        self.rng = rng
+        # np.random.seed(RANDOM_SEED)
 
         # Allocate the circular buffers and indices.
         self.imgs = np.zeros((height, width, max_steps), dtype='uint8')
@@ -197,7 +198,7 @@ class ReplayBuffer(object):
 
         while count < batch_size:
             # Randomly choose a time step from the replay memory.
-            index = np.random.randint(
+            index = self.rng.randint(
                 self.bottom, self.bottom + self.size - self.phi_length)
 
             initial_indices = np.arange(index, index + self.phi_length)
@@ -576,9 +577,9 @@ def get_reward(reward):
 
     return score, reward
 
-def get_epsilon(frame_count):
+def get_epsilon(frm_count):
     #linear descent from 1 to 0.1 starting at the replay_start_time
-    replay_start_time = max([float(frame_count)-PRE_TRAIN_STEPS, 0])
+    replay_start_time = max([float(frm_count)-PRE_TRAIN_STEPS, 0])
     epsilon = START_EPS
     epsilon -= (START_EPS - END_EPS)*\
       (min(replay_start_time, ANNEALING)/float(ANNEALING))
@@ -593,6 +594,7 @@ def train(sess, env, option_critic):  # , critic):
     # Set up summary Ops
     summary_ops, summary_vars = build_summaries()
     np.random.seed(RANDOM_SEED)
+    rng = np.random.RandomState(RANDOM_SEED)
 
     sess.run(tf.global_variables_initializer())
     writer = tf.summary.FileWriter(SUMMARY_DIR, sess.graph)
@@ -605,8 +607,8 @@ def train(sess, env, option_critic):  # , critic):
     state_processor = StateProcessor()
 
     # Initialize replay memory
-    replay_buffer = ReplayBuffer(84, 84, RANDOM_SEED, BUFFER_SIZE, 4)
-    total_steps = 0
+    replay_buffer = ReplayBuffer(84, 84, rng, BUFFER_SIZE, 4)
+    frame_count = 0
     print_option_stats = False
 
     action_counter = [{j: 0 for j in range(
@@ -615,18 +617,18 @@ def train(sess, env, option_critic):  # , critic):
     counter = 0
     for i in xrange(MAX_EPISODES):
         term_probs = []
-        start_frames = total_steps
+        start_frames = frame_count
 
-        while MAX_EP_STEPS > (total_steps - start_frames):
+        while MAX_EP_STEPS > (frame_count - start_frames):
             # if RENDER_ENV:
             #     env.render()
 
-            s = env.reset()  # note I'm using only one step, original uses 4
-            s = state_processor.process(sess, s)
-            s = np.stack([s] * 4, axis=2)
+            current_state = env.reset()  # note I'm using only one step, original uses 4
+            current_state = state_processor.process(sess, current_state)
+            current_state = np.stack([current_state] * 4, axis=2)
             current_option = 0
             current_action = 0
-            new_option = np.argmax(option_critic.predict(s))
+            new_option = np.argmax(option_critic.predict(current_state))
             #+ (1./(1. + i)) # state has more than 3 features in pong
             done = False
             termination = True
@@ -636,14 +638,13 @@ def train(sess, env, option_critic):  # , critic):
             since_last_term = 1
             game_over = False
 
-            start_frame_count = total_steps
+            start_frame_count = frame_count
             episode_counter = 0
 
             while not game_over:
-                total_steps += 1
+                frame_count += 1
                 episode_counter += 1
-                eps = get_epsilon(total_steps)
-
+                eps = get_epsilon(frame_count)
                 if termination:
                     if print_option_stats:
                         print "terminated -------", since_last_term,
@@ -659,7 +660,7 @@ def train(sess, env, option_critic):  # , critic):
                     since_last_term += 1
 
                 action_probs = option_critic.predict_action(
-                    [s], np.reshape(current_option, [1, 1]))[0]
+                    [current_state], np.reshape(current_option, [1, 1]))[0]
                 current_action = np.argmax(np.random.multinomial(1, action_probs))
                 if print_option_stats:
                     if print_option_stats:
@@ -679,68 +680,72 @@ def train(sess, env, option_critic):  # , critic):
 
                         print
 
-                s2, reward, done, info = env.step(current_action)
-                s2 = state_processor.process(sess, s2)
-                s2 = np.append(s[:, :, 1:], np.expand_dims(s2, 2), axis=2)
+                next_state, reward, done, info = env.step(current_action)
+                next_state = state_processor.process(sess, next_state)
+                next_state = np.append(
+                    current_state[:, :, 1:],
+                    np.expand_dims(next_state, 2),
+                    axis=2)
                 score, reward = get_reward(reward)
-                game_over = done or (total_steps-start_frame_count) > MAX_STEPS
+                game_over = done or (frame_count-start_frame_count) > MAX_STEPS
 
                 total_reward += reward
 
-                replay_buffer.add_sample(s[:, :, -1], current_option, score, game_over)
+                replay_buffer.add_sample(current_state[:, :, -1], current_option, score, game_over)
 
-                term = option_critic.predict_termination([s2], [[current_option]])
-                option_term_ps, Q = term[0], term[1]
-                ep_ave_max_q += np.max(Q)
-                new_option = np.argmax(Q)
+                term = option_critic.predict_termination([next_state], [[current_option]])
+                option_term_ps, Q_values = term[0], term[1]
+                ep_ave_max_q += np.max(Q_values)
+                new_option = np.argmax(Q_values)
                 randomize = np.random.uniform(size=np.asarray([0]).shape)
                 termination = np.greater(option_term_ps[0], randomize)
-                if total_steps < PRE_TRAIN_STEPS:
+                if frame_count < PRE_TRAIN_STEPS:
                     termination = 1
-
-                if total_steps > PRE_TRAIN_STEPS:
+                else:
 
                     # done in the original paper, actor is trained on current data
                     # critic trained on sampled one
                     _ = option_critic.train_actor(
-                        [s], [s2],
+                        [current_state], [next_state],
                         np.reshape(current_option, [1, 1]),
                         np.reshape(current_action, [1, 1]),
                         np.reshape(score, [1, 1]),
                         np.reshape(done + 0, [1, 1]))
 
-                    if total_steps % (update_freq) == 0:
+                    if frame_count % (update_freq) == 0:
                         if RENDER_ENV:
                             env.render()
 
                         # Keep adding experience to the memory until
                         # there are at least minibatch size samples
-                        if len(replay_buffer) > MINIBATCH_SIZE:
-                            s_batch, o_batch, score_batch, s2_batch, done_batch = \
-                                replay_buffer.random_batch(MINIBATCH_SIZE)
+                        # if len(replay_buffer) > MINIBATCH_SIZE:
+                        current_state_batch, o_batch, score_batch, next_state_batch, done_batch = \
+                            replay_buffer.random_batch(MINIBATCH_SIZE)
 
-                            _ = option_critic.train_critic(
-                                s_batch, s2_batch,
-                                np.reshape(o_batch, [MINIBATCH_SIZE, 1]),
-                                np.reshape(score_batch, [MINIBATCH_SIZE, 1]),
-                                np.reshape(done_batch + 0, [MINIBATCH_SIZE, 1]))
+                        _ = option_critic.train_critic(
+                            current_state_batch, next_state_batch,
+                            np.reshape(o_batch, [MINIBATCH_SIZE, 1]),
+                            np.reshape(score_batch, [MINIBATCH_SIZE, 1]),
+                            np.reshape(done_batch + 0, [MINIBATCH_SIZE, 1]))
 
-                    if total_steps % (FREEZE_INTERVAL) == 0:
+                    if frame_count % (FREEZE_INTERVAL) == 0:
                         # Update target networks
                         print "updated params"
                         option_critic.update_target_network()
 
-                s = s2
+                current_state = next_state
                 ep_reward += reward
+                term_ratio = float(termination_counter) / float(episode_counter)
+                term_probs.append(term_ratio)
 
                 if done:
                     summary_str = sess.run(summary_ops, feed_dict={
                         summary_vars[0]: ep_reward,
                         summary_vars[1]: ep_ave_max_q / float(episode_counter),
-                        summary_vars[2]: 100*(float(termination_counter) / float(episode_counter)),
+                        summary_vars[2]: 100*term_ratio,
                         summary_vars[3]: total_reward,
                         summary_vars[4]: total_reward / float(counter + 1),
-                        summary_vars[5]: (MAX_EP_STEPS - (total_steps - start_frames))
+                        summary_vars[5]: (MAX_EP_STEPS - (frame_count - start_frames))
                     })
 
                     writer.add_summary(summary_str, i)
@@ -749,10 +754,10 @@ def train(sess, env, option_critic):  # , critic):
                     break
 
             term_ratio = float(termination_counter) / float(episode_counter)
-            print '| Reward: %.2i' % int(ep_reward), " | Episode %d" % (counter + 1 ), \
+            print '| Reward: %.2i' % int(ep_reward), " | Episode %d" % (counter + 1), \
                 ' | Qmax: %.4f' % (ep_ave_max_q / float(episode_counter)), \
                 ' | Cummulative Reward: %.1f' % (total_reward / float(counter + 1)), \
-                ' | %d Remaining Frames' % (MAX_EP_STEPS - (total_steps - start_frames)), \
+                ' | %d Remaining Frames' % (MAX_EP_STEPS - (frame_count - start_frames)), \
                 ' | Epsilon: %.4f' % eps, " | Termination Ratio: %.2f" % (100*term_ratio)
             counter += 1
 
@@ -764,7 +769,7 @@ def main(_):
     if not os.path.exists(SUMMARY_DIR):
         os.makedirs(SUMMARY_DIR)
 
-    np.random.seed(RANDOM_SEED)
+    # np.random.seed(RANDOM_SEED)
     env = gym.make(ENV_NAME)
     env.seed(RANDOM_SEED)
 
@@ -790,7 +795,7 @@ def main(_):
     # assert(env.action_space.high == -env.action_space.low)
 
     with tf.Session() as sess:
-        tf.set_random_seed(RANDOM_SEED)
+        tf.set_random_seed(123456)
         # sess, h_size, temp, state_dim, action_dim, option_dim, action_bound, learning_rate, tau
         option_critic = OptionsNetwork(
             sess, 512, 1, state_dim, action_dim, 8, ACTOR_LEARNING_RATE, TAU, clip_delta=1)
